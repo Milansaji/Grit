@@ -18,7 +18,9 @@ var (
 	mongoDB     *mongo.Database
 )
 
-// MongoInit initializes MongoDB connection
+// ========================
+// Mongo Init
+// ========================
 func MongoInit(uri string, dbName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -39,9 +41,9 @@ func MongoInit(uri string, dbName string) error {
 	return nil
 }
 
-var mongoCollections = map[string]*mongo.Collection{}
-
-// MongoCollection binds a registered model to MongoDB collection
+// ========================
+// Collection Resolver
+// ========================
 func MongoCollection(name string) (*mongo.Collection, error) {
 	if mongoDB == nil {
 		return nil, fmt.Errorf("MongoDB not initialized")
@@ -52,13 +54,12 @@ func MongoCollection(name string) (*mongo.Collection, error) {
 		return nil, fmt.Errorf("model not registered: %s", name)
 	}
 
-	col := mongoDB.Collection(name)
-	mongoCollections[name] = col
-
-	return col, nil
+	return mongoDB.Collection(name), nil
 }
 
-// ---------- CREATE ----------
+// ========================
+// CREATE
+// ========================
 func MongoC(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -77,7 +78,7 @@ func MongoC(name string) http.HandlerFunc {
 		obj := clone(model)
 
 		if err := json.NewDecoder(r.Body).Decode(obj); err != nil {
-			respond(w, 400, false, "Invalid body", nil)
+			respond(w, 400, false, "Invalid request body", nil)
 			return
 		}
 
@@ -87,11 +88,13 @@ func MongoC(name string) http.HandlerFunc {
 			return
 		}
 
-		respond(w, 201, true, "Created", res.InsertedID)
+		respond(w, 201, true, "Created successfully", res.InsertedID)
 	}
 }
 
-// ---------- READ ALL ----------
+// ========================
+// READ ALL
+// ========================
 func MongoR(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -109,7 +112,7 @@ func MongoR(name string) http.HandlerFunc {
 		model := models[name]
 		slice := makeSlice(model)
 
-		cursor, err := col.Find(context.Background(), map[string]interface{}{})
+		cursor, err := col.Find(context.Background(), bson.M{})
 		if err != nil {
 			respond(w, 500, false, err.Error(), nil)
 			return
@@ -124,7 +127,9 @@ func MongoR(name string) http.HandlerFunc {
 	}
 }
 
-// ---------- READ BY ID ----------
+// ========================
+// READ BY ID
+// ========================
 func MongoGetByID(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -142,26 +147,22 @@ func MongoGetByID(name string) http.HandlerFunc {
 			return
 		}
 
-		col, err := MongoCollection(name)
-		if err != nil {
-			respond(w, 500, false, err.Error(), nil)
-			return
-		}
-
 		objID, err := primitive.ObjectIDFromHex(body.ID)
 		if err != nil {
 			respond(w, 400, false, "Invalid ID format", nil)
 			return
 		}
 
+		col, err := MongoCollection(name)
+		if err != nil {
+			respond(w, 500, false, err.Error(), nil)
+			return
+		}
+
 		model := models[name]
 		obj := clone(model)
 
-		err = col.FindOne(
-			context.Background(),
-			bson.M{"_id": objID},
-		).Decode(obj)
-
+		err = col.FindOne(context.Background(), bson.M{"_id": objID}).Decode(obj)
 		if err != nil {
 			respond(w, 404, false, "Record not found", nil)
 			return
@@ -171,7 +172,9 @@ func MongoGetByID(name string) http.HandlerFunc {
 	}
 }
 
-// ---------- UPDATE ----------
+// ========================
+// UPDATE
+// ========================
 func MongoU(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -204,7 +207,12 @@ func MongoU(name string) http.HandlerFunc {
 			return
 		}
 
-		delete(payload, "id") // never update _id
+		delete(payload, "id") // 🔥 never update _id
+
+		if len(payload) == 0 {
+			respond(w, 400, false, "No fields to update", nil)
+			return
+		}
 
 		col, err := MongoCollection(name)
 		if err != nil {
@@ -232,7 +240,9 @@ func MongoU(name string) http.HandlerFunc {
 	}
 }
 
-// ---------- DELETE ----------
+// ========================
+// DELETE
+// ========================
 func MongoD(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -245,8 +255,14 @@ func MongoD(name string) http.HandlerFunc {
 			ID string `json:"id"`
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			respond(w, 400, false, "Invalid ID", nil)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
+			respond(w, 400, false, "ID required", nil)
+			return
+		}
+
+		objID, err := primitive.ObjectIDFromHex(body.ID)
+		if err != nil {
+			respond(w, 400, false, "Invalid ID format", nil)
 			return
 		}
 
@@ -256,17 +272,17 @@ func MongoD(name string) http.HandlerFunc {
 			return
 		}
 
-		objID, _ := primitive.ObjectIDFromHex(body.ID)
-		res, _ := col.DeleteOne(
-			context.Background(),
-			bson.M{"_id": objID},
-		)
-
-		if res.DeletedCount == 0 {
-			respond(w, 404, false, "Not found", nil)
+		res, err := col.DeleteOne(context.Background(), bson.M{"_id": objID})
+		if err != nil {
+			respond(w, 500, false, err.Error(), nil)
 			return
 		}
 
-		respond(w, 200, true, "Deleted", nil)
+		if res.DeletedCount == 0 {
+			respond(w, 404, false, "Record not found", nil)
+			return
+		}
+
+		respond(w, 200, true, "Deleted successfully", nil)
 	}
 }

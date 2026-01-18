@@ -3,6 +3,20 @@ package grit
 import (
 	"log"
 	"net/http"
+	"time"
+)
+
+// ----------------------
+// ANSI COLORS
+// ----------------------
+const (
+	Reset  = "\033[0m"
+	Red    = "\033[31m"
+	Green  = "\033[32m"
+	Yellow = "\033[33m"
+	Blue   = "\033[34m"
+	Purple = "\033[35m"
+	Gray   = "\033[90m"
 )
 
 // Router is a simple method-based router
@@ -19,7 +33,14 @@ func New() *Router {
 
 // Start starts the HTTP server
 func (r *Router) Start(port string) error {
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+
+	routerHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+		// Handle OPTIONS
+		if req.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
 		if methodRoutes, ok := r.routes[req.Method]; ok {
 			if handler, exists := methodRoutes[req.URL.Path]; exists {
@@ -28,67 +49,116 @@ func (r *Router) Start(port string) error {
 			}
 		}
 
-		// fallback: route not found
+		log.Printf("%s[404]%s %s %s",
+			Red, Reset,
+			req.Method,
+			req.URL.Path,
+		)
+
 		HandleNotFound(w, req)
 	})
 
-	log.Printf("Server starting on http://localhost:%s/", port)
+	handler := loggingMiddleware(corsMiddleware(routerHandler))
+
+	log.Printf("%s🚀 Server running at http://localhost:%s%s", Green, port, Reset)
+	http.Handle("/", handler)
+
 	return http.ListenAndServe(":"+port, nil)
 }
 
-// internal route handler
+// ----------------------
+// LOGGING MIDDLEWARE
+// ----------------------
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		duration := time.Since(start)
+
+		color := methodColor(r.Method)
+
+		log.Printf(
+			"%s[%s]%s %s %s %s(%v)%s",
+			color,
+			r.Method,
+			Reset,
+			r.RemoteAddr,
+			r.URL.Path,
+			Gray,
+			duration,
+			Reset,
+		)
+	})
+}
+
+// ----------------------
+// CORS MIDDLEWARE
+// ----------------------
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ----------------------
+// ROUTE REGISTRATION
+// ----------------------
 func (r *Router) handle(method, path string, handler http.HandlerFunc) {
 	if r.routes[method] == nil {
 		r.routes[method] = make(map[string]http.HandlerFunc)
 	}
 	r.routes[method][path] = handler
-	log.Printf("[%s] route registered: %s", method, path)
+
+	log.Printf(
+		"%s🧩 [%s]%s route registered: %s",
+		Blue,
+		method,
+		Reset,
+		path,
+	)
 }
 
-// Get registers a GET route
-func (r *Router) Get(path string, handlerFunc http.HandlerFunc) {
-	r.handle("GET", path, func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodGet {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handlerFunc(w, req)
-		log.Printf("[GET] request for %s handled successfully", path)
-	})
+func (r *Router) Get(path string, handler http.HandlerFunc) {
+	r.handle(http.MethodGet, path, handler)
 }
 
-// Post registers a POST route
-func (r *Router) Post(path string, handlerFunc http.HandlerFunc) {
-	r.handle("POST", path, func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handlerFunc(w, req)
-		log.Printf("[POST] request for %s handled successfully", path)
-	})
+func (r *Router) Post(path string, handler http.HandlerFunc) {
+	r.handle(http.MethodPost, path, handler)
 }
 
-// Put registers a PUT route
-func (r *Router) Put(path string, handlerFunc http.HandlerFunc) {
-	r.handle("PUT", path, func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPut {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handlerFunc(w, req)
-		log.Printf("[PUT] request for %s handled successfully", path)
-	})
+func (r *Router) Put(path string, handler http.HandlerFunc) {
+	r.handle(http.MethodPut, path, handler)
 }
 
-// Delete registers a DELETE route
-func (r *Router) Delete(path string, handlerFunc http.HandlerFunc) {
-	r.handle("DELETE", path, func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodDelete {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handlerFunc(w, req)
-		log.Printf("[DELETE] request for %s handled successfully", path)
-	})
+func (r *Router) Delete(path string, handler http.HandlerFunc) {
+	r.handle(http.MethodDelete, path, handler)
+}
+
+// ----------------------
+// METHOD COLOR HELPER
+// ----------------------
+func methodColor(method string) string {
+	switch method {
+	case http.MethodGet:
+		return Green
+	case http.MethodPost:
+		return Yellow
+	case http.MethodPut:
+		return Purple
+	case http.MethodDelete:
+		return Red
+	default:
+		return Gray
+	}
 }
