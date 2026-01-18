@@ -6,22 +6,11 @@ import "net/http"
 var NewRouter = New
 
 // Middleware
-
-// TODO: Implement AuthProtected or import it from the correct package
-// Example placeholder implementation:
-var AuthProtected = func(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Authentication logic goes here
-		next(w, r)
-	}
-}
-
-var Protect = AuthProtected
-var ProtectMongo = AuthProtectedMongo
+var Protect = ProtectSQLite
 
 // SQLite Auth
-var SignupSQLite = CreateUserWithEmailAndPassword
-var SigninSQLite = SigninUserWithEmailAndPass
+var SignupSQLite = SignupSQLiteHandler
+var SigninSQLite = SigninSQLiteHandler
 
 // Mongo Auth
 var SignupMongo = CreateUserWithEmailAndPasswordMongo

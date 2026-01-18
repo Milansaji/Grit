@@ -1,41 +1,64 @@
 package main
 
-import "github.com/Milansaji/Grit.git/grit"
+import (
+	"log"
+	"os"
+	"time"
+
+	"github.com/Milansaji/Grit.git/grit"
+	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 func main() {
 
-	// Mongo init
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Read env variables
+	jwtSecret := os.Getenv("JWT_SECRET")
+	mongoURI := os.Getenv("MONGO_URI")
+
+	if jwtSecret == "" || mongoURI == "" {
+		log.Fatal("Missing JWT_SECRET or MONGO_URI in .env")
+	}
+
 	grit.MongoConnect(
-		"mongodb+srv://larkmaintenance_db_user:h2JQ40SheIlxYVsK@cluster0.ud2gne2.mongodb.net/?appName=Cluster0",
+		mongoURI,
 		"gritdb",
 	)
 
 	r := grit.NewRouter()
+	r.Post("/signup", grit.SignupMongo(jwtSecret))
+	r.Post("/signin", grit.SigninMongo(jwtSecret))
+	auth := grit.MongoProtected(jwtSecret)
 
-	// Auth
-	r.Post("/signup", grit.SignupMongo("b7c98b2711103a901292e0dfb9f48339d05940d36b8ee6ea783c56f4b64dc1e1"))
-	r.Post("/signin", grit.SigninMongo("b7c98b2711103a901292e0dfb9f48339d05940d36b8ee6ea783c56f4b64dc1e1"))
+	r.Get("/users", auth(grit.RequirePermission(jwtSecret, "admin:all")(grit.GetAllUsersMongo())))
 
-	// Protected route
-	r.Get("/users",
-		grit.Protect("b7c98b2711103a901292e0dfb9f48339d05940d36b8ee6ea783c56f4b64dc1e1")(
-			grit.GetAllUsersMongo(),
-		),
-	)
-
-	grit.RegisterModel("products", &Product{})
-
-	r.Post("/products", grit.GritC("products"))
-	r.Get("/products", grit.GritR("products"))
-	r.Post("/product", grit.GritGetByID("products"))
-	r.Put("/product", grit.GritU("products"))
-	r.Delete("/product", grit.GritD("products"))
-
+	r.Delete("/user", auth(grit.RequirePermission(jwtSecret, "admin:all")(grit.DeleteUserMongo())))
+	grit.RegisterModel("blogs", &Blog{})
+	r.Post("/blogs", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoC("blogs"))))
+	r.Get("/blogs", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoR("blogs"))))
+	r.Get("/blog", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoGetByID("blogs"))))
+	r.Put("/blog", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoU("blogs"))))
+	r.Delete("/blog", auth(grit.RequirePermission(jwtSecret, "admin:all")(grit.MongoD("blogs"))))
 	r.Start("8080")
 }
 
-type Product struct {
-	ID    uint   `json:"id"`
-	Name  string `json:"name"`
-	Price int    `json:"price"`
+type Blog struct {
+	ID primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+
+	Title       string `bson:"title" json:"title"`
+	Slug        string `bson:"slug" json:"slug"`
+	Content     string `bson:"content" json:"content"`
+	Thumbnail   string `bson:"thumbnail" json:"thumbnail"`
+	IsPublished bool   `bson:"is_published" json:"is_published"`
+
+	// Owner (JWT user)
+	UserID primitive.ObjectID `bson:"user_id" json:"user_id"`
+
+	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
 }

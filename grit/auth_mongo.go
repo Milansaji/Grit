@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/mail"
-	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -23,11 +22,12 @@ type AuthUser struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	Email        string             `bson:"email" json:"email"`
 	PasswordHash string             `bson:"password_hash" json:"-"`
+	Permissions  []string           `bson:"permissions,omitempty" json:"permissions"`
 	CreatedAt    time.Time          `bson:"created_at" json:"created_at"`
 }
 
 /* =========================
-   INTERNAL RESPONSE
+   RESPONSE
 ========================= */
 
 func authRespond(w http.ResponseWriter, code int, success bool, msg string, data interface{}) {
@@ -41,7 +41,7 @@ func authRespond(w http.ResponseWriter, code int, success bool, msg string, data
 }
 
 /* =========================
-   SIGNUP + JWT
+   SIGNUP
 ========================= */
 
 func CreateUserWithEmailAndPasswordMongo(jwtSecret string) http.HandlerFunc {
@@ -77,83 +77,51 @@ func CreateUserWithEmailAndPasswordMongo(jwtSecret string) http.HandlerFunc {
 			return
 		}
 
-		if mongoDB == nil {
-			authRespond(w, 500, false, "MongoDB not initialized", nil)
-			return
-		}
-
 		col := mongoDB.Collection("users")
 
-		// check duplicate
-		count, err := col.CountDocuments(
-			context.Background(),
-			bson.M{"email": body.Email},
-		)
-		if err != nil {
-			authRespond(w, 500, false, err.Error(), nil)
-			return
-		}
-
-		if count > 0 {
+		// duplicate check
+		if count, _ := col.CountDocuments(context.Background(), bson.M{"email": body.Email}); count > 0 {
 			authRespond(w, 409, false, "Email already exists", nil)
 			return
 		}
 
-		hash, err := bcrypt.GenerateFromPassword(
-			[]byte(body.Password),
-			bcrypt.DefaultCost,
-		)
-		if err != nil {
-			authRespond(w, 500, false, "Password hashing failed", nil)
-			return
+		// first user = admin
+		totalUsers, _ := col.CountDocuments(context.Background(), bson.M{})
+		permissions := []string{"user:read"}
+
+		if totalUsers == 0 {
+			permissions = []string{"admin:all"}
 		}
+
+		hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 
 		user := AuthUser{
 			ID:           primitive.NewObjectID(),
 			Email:        body.Email,
 			PasswordHash: string(hash),
+			Permissions:  permissions,
 			CreatedAt:    time.Now(),
 		}
 
-		if _, err := col.InsertOne(context.Background(), user); err != nil {
-			authRespond(w, 500, false, "Failed to create user", nil)
-			return
-		}
+		col.InsertOne(context.Background(), user)
 
-		claims := jwt.MapClaims{
-			"sub":   user.ID.Hex(),
-			"email": user.Email,
-			"iat":   time.Now().Unix(),
-			"exp":   time.Now().Add(24 * time.Hour).Unix(),
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		signed, err := token.SignedString([]byte(jwtSecret))
-		if err != nil {
-			authRespond(w, 500, false, "Token generation failed", nil)
-			return
-		}
+		token := buildJWT(user, jwtSecret)
 
 		user.PasswordHash = ""
 
 		authRespond(w, 201, true, "Signup successful", map[string]interface{}{
-			"token": signed,
+			"token": token,
 			"user":  user,
 		})
 	}
 }
 
 /* =========================
-   SIGNIN + JWT
+   SIGNIN (FIXED)
 ========================= */
 
 func SigninUserWithEmailAndPassMongo(jwtSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, r, "POST")
-			return
-		}
 
 		var body struct {
 			Email    string `json:"email"`
@@ -168,41 +136,52 @@ func SigninUserWithEmailAndPassMongo(jwtSecret string) http.HandlerFunc {
 		col := mongoDB.Collection("users")
 
 		var user AuthUser
-		err := col.FindOne(
-			context.Background(),
-			bson.M{"email": body.Email},
-		).Decode(&user)
-
-		if err != nil {
+		if err := col.FindOne(context.Background(), bson.M{"email": body.Email}).Decode(&user); err != nil {
 			authRespond(w, 401, false, "Invalid email or password", nil)
 			return
 		}
 
-		if err := bcrypt.CompareHashAndPassword(
-			[]byte(user.PasswordHash),
-			[]byte(body.Password),
-		); err != nil {
+		if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)) != nil {
 			authRespond(w, 401, false, "Invalid email or password", nil)
 			return
 		}
 
-		claims := jwt.MapClaims{
-			"sub":   user.ID.Hex(),
-			"email": user.Email,
-			"iat":   time.Now().Unix(),
-			"exp":   time.Now().Add(24 * time.Hour).Unix(),
+		// 🔥 FIX: fallback permissions for OLD USERS
+		if len(user.Permissions) == 0 {
+			user.Permissions = []string{"user:read"}
+			col.UpdateOne(
+				context.Background(),
+				bson.M{"_id": user.ID},
+				bson.M{"$set": bson.M{"permissions": user.Permissions}},
+			)
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		signed, _ := token.SignedString([]byte(jwtSecret))
+		token := buildJWT(user, jwtSecret)
 
 		user.PasswordHash = ""
 
 		authRespond(w, 200, true, "Signin successful", map[string]interface{}{
-			"token": signed,
+			"token": token,
 			"user":  user,
 		})
 	}
+}
+
+/* =========================
+   JWT BUILDER (SINGLE SOURCE)
+========================= */
+
+func buildJWT(user AuthUser, secret string) string {
+	claims := jwt.MapClaims{
+		"sub":         user.ID.Hex(),
+		"email":       user.Email,
+		"permissions": user.Permissions,
+		"exp":         time.Now().Add(24 * time.Hour).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, _ := token.SignedString([]byte(secret))
+	return signed
 }
 
 /* =========================
@@ -212,83 +191,22 @@ func SigninUserWithEmailAndPassMongo(jwtSecret string) http.HandlerFunc {
 func GetAllUsersMongo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		if r.Method != http.MethodGet {
-			methodNotAllowed(w, r, "GET")
-			return
-		}
-
 		col := mongoDB.Collection("users")
 
 		var users []AuthUser
-
-		cursor, err := col.Find(context.Background(), bson.M{})
-		if err != nil {
-			authRespond(w, 500, false, err.Error(), nil)
-			return
-		}
-
-		if err := cursor.All(context.Background(), &users); err != nil {
-			authRespond(w, 500, false, err.Error(), nil)
-			return
-		}
+		cursor, _ := col.Find(context.Background(), bson.M{})
+		cursor.All(context.Background(), &users)
 
 		for i := range users {
 			users[i].PasswordHash = ""
+			if len(users[i].Permissions) == 0 {
+				users[i].Permissions = []string{"user:read"}
+			}
 		}
 
 		authRespond(w, 200, true, "Users fetched successfully", users)
 	}
 }
-
-/* =========================
-   GET USER BY ID
-========================= */
-
-func GetUserByIDMongo() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, r, "POST")
-			return
-		}
-
-		var body struct {
-			ID string `json:"id"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
-			authRespond(w, 400, false, "User ID required", nil)
-			return
-		}
-
-		objID, err := primitive.ObjectIDFromHex(body.ID)
-		if err != nil {
-			authRespond(w, 400, false, "Invalid ID format", nil)
-			return
-		}
-
-		col := mongoDB.Collection("users")
-
-		var user AuthUser
-		err = col.FindOne(
-			context.Background(),
-			bson.M{"_id": objID},
-		).Decode(&user)
-
-		if err != nil {
-			authRespond(w, 404, false, "User not found", nil)
-			return
-		}
-
-		user.PasswordHash = ""
-
-		authRespond(w, 200, true, "User fetched successfully", user)
-	}
-}
-
-/* =========================
-   DELETE USER
-========================= */
 
 func DeleteUserMongo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -331,48 +249,5 @@ func DeleteUserMongo() http.HandlerFunc {
 		}
 
 		authRespond(w, 200, true, "User deleted successfully", nil)
-	}
-}
-
-/* =========================
-   AUTH PROTECTED (JWT)
-========================= */
-
-func AuthProtectedMongo(jwtSecret string) func(http.HandlerFunc) http.HandlerFunc {
-
-	secret := []byte(jwtSecret)
-
-	return func(next http.HandlerFunc) http.HandlerFunc {
-
-		return func(w http.ResponseWriter, r *http.Request) {
-
-			auth := r.Header.Get("Authorization")
-			if auth == "" {
-				http.Error(w, "Authorization token required", http.StatusUnauthorized)
-				return
-			}
-
-			parts := strings.Split(auth, " ")
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "Invalid token format", http.StatusUnauthorized)
-				return
-			}
-
-			token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
-
-				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-
-				return secret, nil
-			})
-
-			if err != nil || !token.Valid {
-				http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
-				return
-			}
-
-			next(w, r)
-		}
 	}
 }
