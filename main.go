@@ -33,6 +33,9 @@ func main() {
 	r := grit.NewRouter()
 	r.Post("/signup", grit.SignupMongo(jwtSecret))
 	r.Post("/signin", grit.SigninMongo(jwtSecret))
+	r.Post("/local/signup", grit.SignupSQLite)
+	r.Post("/local/signin", grit.SigninSQLite(jwtSecret))
+
 	auth := grit.MongoProtected(jwtSecret)
 
 	r.Get("/users", auth(grit.RequirePermission(jwtSecret, "admin:all")(grit.GetAllUsersMongo())))
@@ -44,6 +47,13 @@ func main() {
 	r.Get("/blog", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoGetByID("blogs"))))
 	r.Put("/blog", auth(grit.RequirePermission(jwtSecret, "user:read")(grit.MongoU("blogs"))))
 	r.Delete("/blog", auth(grit.RequirePermission(jwtSecret, "admin:all")(grit.MongoD("blogs"))))
+
+	r.Get("/local/blogs", grit.GritR("blogs"))
+	r.Get("/local/blog", grit.GritGetByID("blogs"))
+	r.Post("/local/blogs", grit.GritC("blogs"))
+	r.Put("/local/blogs", grit.GritU("blogs"))
+	r.Delete("/local/blogs", grit.GritD("blogs"))
+
 	r.Start("8080")
 }
 
