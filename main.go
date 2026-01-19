@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Milansaji/Grit.git/grit"
+	"github.com/Milansaji/Grit/grit"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
