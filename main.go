@@ -54,7 +54,7 @@ func main() {
 	r.Put("/local/blogs", grit.GritU("blogs"))
 	r.Delete("/local/blogs", grit.GritD("blogs"))
 
-	r.Start("8080")
+	r.Start("8081")
 }
 
 type Blog struct {
