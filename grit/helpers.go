@@ -44,3 +44,14 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request, allowed string) {
 		nil,
 	)
 }
+
+// HealthHandler is a ready-to-use handler that returns a simple health check response.
+// Register it on any public route:
+//
+//	r.Get("/health", grit.HealthHandler)
+func HealthHandler(w http.ResponseWriter, r *http.Request) {
+	respond(w, 200, true, "OK", map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}

@@ -133,21 +133,19 @@ func MongoR(name string) http.HandlerFunc {
 func MongoGetByID(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, r, "POST")
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, r, "GET")
 			return
 		}
 
-		var body struct {
-			ID string `json:"id"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
-			respond(w, 400, false, "ID is required", nil)
+		// ✅ Read ID from query param
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			respond(w, 400, false, "ID query parameter is required", nil)
 			return
 		}
 
-		objID, err := primitive.ObjectIDFromHex(body.ID)
+		objID, err := primitive.ObjectIDFromHex(id)
 		if err != nil {
 			respond(w, 400, false, "Invalid ID format", nil)
 			return
@@ -162,7 +160,11 @@ func MongoGetByID(name string) http.HandlerFunc {
 		model := models[name]
 		obj := clone(model)
 
-		err = col.FindOne(context.Background(), bson.M{"_id": objID}).Decode(obj)
+		err = col.FindOne(
+			context.Background(),
+			bson.M{"_id": objID},
+		).Decode(obj)
+
 		if err != nil {
 			respond(w, 404, false, "Record not found", nil)
 			return

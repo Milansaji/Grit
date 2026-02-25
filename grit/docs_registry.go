@@ -1,37 +1,46 @@
 package grit
 
-type DocEntry struct {
-	Method    string
-	Path      string
-	Summary   string
-	Protected bool
-	Body      map[string]interface{}
+type DocParam struct {
+	Name        string
+	In          string // "query", "path", or "header"
+	Required    bool
+	Type        string // "string", "integer", "boolean", "number", "array"
+	Example     interface{}
+	Description string // Description for Swagger UI
 }
 
-// key = METHOD:PATH
+type DocEntry struct {
+	Method      string
+	Path        string
+	Summary     string
+	Description string // Endpoint description
+	Protected   bool
+	Body        map[string]interface{}
+	Params      []DocParam
+}
+
 var docsRegistry = map[string]DocEntry{}
 
 func docKey(method, path string) string {
 	return method + ":" + path
 }
 
-// auto registration (called from router)
+// Auto registration (router uses this)
 func registerDocs(method, path string) {
 	key := docKey(method, path)
-
-	if _, exists := docsRegistry[key]; exists {
+	if _, ok := docsRegistry[key]; ok {
 		return
 	}
-
 	docsRegistry[key] = DocEntry{
-		Method:  method,
-		Path:    path,
-		Summary: method + " " + path,
+		Method:      method,
+		Path:        path,
+		Summary:     method + " " + path,
+		Description: "Auto-generated endpoint for " + path,
 	}
 }
 
-// optional explicit override
-func registerDoc(d DocEntry) {
+// Manual override
+func RegisterDoc(d DocEntry) {
 	key := docKey(d.Method, d.Path)
 	docsRegistry[key] = d
 }

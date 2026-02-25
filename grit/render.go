@@ -40,8 +40,8 @@ func RenderTemplate(w http.ResponseWriter, filename string) {
 
 // HandleNotFound handles 404 routes
 func HandleNotFound(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotFound)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
 
 	fmt.Fprint(
 		w,

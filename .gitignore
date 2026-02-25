@@ -1,0 +1,9 @@
+.env
+go.mod
+go.sum
+
+# Firebase credentials — NEVER commit this
+serviceAccountKey.json
+firebase/serviceAccountKey.json
+
+./firebase
