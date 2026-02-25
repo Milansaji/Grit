@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -122,7 +122,8 @@ func SignupSQLiteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user.PasswordHash = ""
-	json.NewEncoder(w).Encode(user)
+
+	respond(w, 201, true, "Signup successful", user)
 }
 
 /* =========================
@@ -142,7 +143,10 @@ func SigninSQLiteHandler(jwtSecret string) http.HandlerFunc {
 			Password string `json:"password"`
 		}
 
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONError(w, 400, "invalid body")
+			return
+		}
 
 		var user User
 		if err := sqliteDB.Where("email = ?", body.Email).First(&user).Error; err != nil {
@@ -172,7 +176,7 @@ func SigninSQLiteHandler(jwtSecret string) http.HandlerFunc {
 
 		user.PasswordHash = ""
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		respond(w, 200, true, "Signin successful", map[string]interface{}{
 			"token": signed,
 			"user":  user,
 		})
@@ -214,4 +218,69 @@ func ProtectSQLite(jwtSecret string) func(http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 		}
 	}
+}
+
+/* =========================
+   GET ALL USERS (SQLITE)
+========================= */
+
+func GetAllUsersSQLiteHandler(w http.ResponseWriter, r *http.Request) {
+
+	if err := InitSQLite(); err != nil {
+		writeJSONError(w, 500, "database error")
+		return
+	}
+
+	var users []User
+
+	if err := sqliteDB.Find(&users).Error; err != nil {
+		writeJSONError(w, 500, "failed to fetch users")
+		return
+	}
+
+	for i := range users {
+		users[i].PasswordHash = ""
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Users fetched successfully",
+		"data":    users,
+	})
+}
+
+/* =========================
+   GET USER BY ID (SQLITE)
+========================= */
+
+func GetUserByIDSQLiteHandler(w http.ResponseWriter, r *http.Request) {
+
+	if err := InitSQLite(); err != nil {
+		writeJSONError(w, 500, "database error")
+		return
+	}
+
+	// Read id from query param
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJSONError(w, 400, "user id is required")
+		return
+	}
+
+	var user User
+
+	if err := sqliteDB.First(&user, id).Error; err != nil {
+		writeJSONError(w, 404, "user not found")
+		return
+	}
+
+	user.PasswordHash = ""
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User fetched successfully",
+		"data":    user,
+	})
 }

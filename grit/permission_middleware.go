@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 func RequirePermission(jwtSecret string, required string) func(http.HandlerFunc) http.HandlerFunc {
@@ -27,6 +27,10 @@ func RequirePermission(jwtSecret string, required string) func(http.HandlerFunc)
 			}
 
 			token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
+				// Enforce HMAC to prevent algorithm confusion attacks
+				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, jwt.ErrSignatureInvalid
+				}
 				return secret, nil
 			})
 
@@ -35,14 +39,24 @@ func RequirePermission(jwtSecret string, required string) func(http.HandlerFunc)
 				return
 			}
 
-			claims := token.Claims.(jwt.MapClaims)
-			rawPerms := claims["permissions"].([]interface{})
+			claims, ok := token.Claims.(jwt.MapClaims)
+			if !ok {
+				http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+				return
+			}
+
+			rawPerms, ok := claims["permissions"].([]interface{})
+			if !ok {
+				http.Error(w, "Permissions missing", http.StatusForbidden)
+				return
+			}
 
 			for _, p := range rawPerms {
-				perm := p.(string)
-				if perm == required || perm == "admin:all" {
-					next(w, r)
-					return
+				if perm, ok := p.(string); ok {
+					if perm == required || perm == "admin:all" {
+						next(w, r)
+						return
+					}
 				}
 			}
 

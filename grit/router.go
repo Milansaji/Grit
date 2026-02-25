@@ -25,7 +25,7 @@ func New() *Router {
 		routes: make(map[string]map[string]http.HandlerFunc),
 	}
 
-	// Built-in docs
+	// 🔥 Built-in Swagger
 	r.handle(http.MethodGet, "/docs", DocsHandler())
 	r.handle(http.MethodGet, "/openapi.json", OpenAPIHandler())
 
@@ -53,7 +53,7 @@ func (r *Router) Start(port string) error {
 		HandleNotFound(w, req)
 	})
 
-	h := loggingMiddleware(corsMiddleware(handler))
+	h := loggingMiddleware(corsMiddleware(bodySizeLimiter(handler)))
 
 	log.Printf("%s🚀 Server http://localhost:%s%s", Green, port, Reset)
 	log.Printf("%s📘 Docs http://localhost:%s/docs%s", Blue, port, Reset)
@@ -66,16 +66,24 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s[%s]%s %s %s %s(%v)%s",
-			methodColor(r.Method), r.Method, Reset,
-			r.RemoteAddr, r.URL.Path,
-			Gray, time.Since(start), Reset,
+
+		log.Printf(
+			"%s[%s]%s %s %s %s(%v)%s",
+			methodColor(r.Method),
+			r.Method,
+			Reset,
+			r.RemoteAddr,
+			r.URL.Path,
+			Gray,
+			time.Since(start),
+			Reset,
 		)
 	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -88,19 +96,31 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func (r *Router) handle(method, path string, h http.HandlerFunc) {
+
 	if r.routes[method] == nil {
 		r.routes[method] = map[string]http.HandlerFunc{}
 	}
+
 	r.routes[method][path] = h
 
-	// auto register minimal doc
+	// 🔥 AUTO DOC REGISTRATION
 	registerDocs(method, path)
+
+	log.Printf("%s🧩 [%s]%s %s", Blue, method, Reset, path)
 }
 
 func (r *Router) Get(p string, h http.HandlerFunc)    { r.handle(http.MethodGet, p, h) }
 func (r *Router) Post(p string, h http.HandlerFunc)   { r.handle(http.MethodPost, p, h) }
 func (r *Router) Put(p string, h http.HandlerFunc)    { r.handle(http.MethodPut, p, h) }
+func (r *Router) Patch(p string, h http.HandlerFunc)  { r.handle(http.MethodPatch, p, h) }
 func (r *Router) Delete(p string, h http.HandlerFunc) { r.handle(http.MethodDelete, p, h) }
+
+func bodySizeLimiter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
+		next.ServeHTTP(w, r)
+	})
+}
 
 func methodColor(m string) string {
 	switch m {
@@ -110,6 +130,8 @@ func methodColor(m string) string {
 		return Yellow
 	case "PUT":
 		return Purple
+	case "PATCH":
+		return Blue
 	case "DELETE":
 		return Red
 	default:
