@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	"github.com/milansaji/grit/grit"
+	"github.com/Milansaji/Grit/grit"
 )
 
 // model
