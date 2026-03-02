@@ -1,4 +1,4 @@
-module github.com/Milansaji/Grit/grit
+module github.com/Milansaji/Grit
 
 go 1.25.7
 
