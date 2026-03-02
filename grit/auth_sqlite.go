@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -12,6 +13,28 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+/* =========================
+   TOKEN BLACKLIST (SQLite)
+========================= */
+
+var (
+	sqliteTokenBlacklist = map[string]struct{}{}
+	sqliteBlacklistMu    sync.RWMutex
+)
+
+func sqliteBlacklistAdd(token string) {
+	sqliteBlacklistMu.Lock()
+	defer sqliteBlacklistMu.Unlock()
+	sqliteTokenBlacklist[token] = struct{}{}
+}
+
+func sqliteBlacklistContains(token string) bool {
+	sqliteBlacklistMu.RLock()
+	defer sqliteBlacklistMu.RUnlock()
+	_, ok := sqliteTokenBlacklist[token]
+	return ok
+}
 
 /* =========================
    MODEL
@@ -206,7 +229,15 @@ func ProtectSQLite(jwtSecret string) func(http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
+			rawToken := parts[1]
+
+			// Reject blacklisted (signed-out) tokens
+			if sqliteBlacklistContains(rawToken) {
+				http.Error(w, "token revoked", 401)
+				return
+			}
+
+			token, err := jwt.Parse(rawToken, func(t *jwt.Token) (interface{}, error) {
 				return secret, nil
 			})
 
@@ -218,6 +249,25 @@ func ProtectSQLite(jwtSecret string) func(http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 		}
 	}
+}
+
+/* =========================
+   SIGNOUT
+========================= */
+
+// SignoutSQLiteHandler invalidates the current JWT by adding it to the
+// in-memory blacklist. The client should discard the token after this call.
+//
+// Usage:
+//
+//	r.Post("/auth/signout", grit.ProtectSQLite(secret)(grit.SignoutSQLiteHandler))
+func SignoutSQLiteHandler(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	parts := strings.Split(auth, " ")
+	if len(parts) == 2 {
+		sqliteBlacklistAdd(parts[1])
+	}
+	respond(w, 200, true, "Signed out successfully", nil)
 }
 
 /* =========================

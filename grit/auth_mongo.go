@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/mail"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -13,6 +15,28 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+/* =========================
+   TOKEN BLACKLIST (Mongo)
+========================= */
+
+var (
+	mongoTokenBlacklist = map[string]struct{}{}
+	mongoBlacklistMu    sync.RWMutex
+)
+
+func mongoBlacklistAdd(token string) {
+	mongoBlacklistMu.Lock()
+	defer mongoBlacklistMu.Unlock()
+	mongoTokenBlacklist[token] = struct{}{}
+}
+
+func mongoBlacklistContains(token string) bool {
+	mongoBlacklistMu.RLock()
+	defer mongoBlacklistMu.RUnlock()
+	_, ok := mongoTokenBlacklist[token]
+	return ok
+}
 
 /* =========================
    MODEL
@@ -250,4 +274,23 @@ func DeleteUserMongo() http.HandlerFunc {
 
 		authRespond(w, 200, true, "User deleted successfully", nil)
 	}
+}
+
+/* =========================
+   SIGNOUT
+========================= */
+
+// SignoutMongoHandler invalidates the current JWT by adding it to the
+// in-memory blacklist. The client should discard the token after this call.
+//
+// Usage:
+//
+//	r.Post("/auth/signout", grit.SignoutMongoHandler)
+func SignoutMongoHandler(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	parts := strings.Split(auth, " ")
+	if len(parts) == 2 {
+		mongoBlacklistAdd(parts[1])
+	}
+	authRespond(w, 200, true, "Signed out successfully", nil)
 }

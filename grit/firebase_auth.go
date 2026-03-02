@@ -319,3 +319,34 @@ func buildFirebaseJWT(uid, email, secret string) string {
 	signed, _ := token.SignedString([]byte(secret))
 	return signed
 }
+
+// ========================
+// SIGNOUT — Revoke Firebase Refresh Tokens
+// ========================
+
+// FirebaseSignoutHandler revokes all refresh tokens for the authenticated user
+// in Firebase, effectively signing them out on all devices. The uid is read
+// from the app-level JWT (set by FirebaseProtected middleware).
+//
+// Must be wrapped with FirebaseProtected middleware:
+//
+//	r.Post("/auth/signout", grit.FirebaseProtected(secret)(grit.FirebaseSignoutHandler))
+func FirebaseSignoutHandler(w http.ResponseWriter, r *http.Request) {
+	if firebaseAuthClient == nil {
+		respond(w, 500, false, "Firebase not initialized. Call grit.FirebaseInit() first.", nil)
+		return
+	}
+
+	uid, _ := r.Context().Value(FirebaseUIDKey).(string)
+	if uid == "" {
+		respond(w, 401, false, "Unauthorized: uid not found in token", nil)
+		return
+	}
+
+	if err := firebaseAuthClient.RevokeRefreshTokens(context.Background(), uid); err != nil {
+		respond(w, 500, false, "Failed to revoke tokens: "+err.Error(), nil)
+		return
+	}
+
+	respond(w, 200, true, "Signed out successfully. All sessions revoked.", nil)
+}

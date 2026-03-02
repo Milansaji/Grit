@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -542,6 +543,71 @@ func SupabaseD(name string) http.HandlerFunc {
 
 		respond(w, 200, true, "Deleted successfully", nil)
 	}
+}
+
+// ========================
+// SIGNOUT — Supabase Auth
+// ========================
+
+// SupabaseSignoutHandler signs out the current user by calling Supabase's
+// /auth/v1/logout endpoint with the user's access token (Bearer token extracted
+// from the Authorization header). This invalidates the session server-side.
+//
+// Usage:
+//
+//	r.Post("/auth/signout", grit.SupabaseSignoutHandler)
+//
+// The client must send:  Authorization: Bearer <supabase_access_token>
+func SupabaseSignoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r, "POST")
+		return
+	}
+
+	if supabaseURL == "" {
+		respond(w, 500, false, "Supabase not initialized. Call grit.SupabaseInit() first.", nil)
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		respond(w, 401, false, "Authorization header is required", nil)
+		return
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 {
+		respond(w, 401, false, "Invalid Authorization header format. Use: Bearer <token>", nil)
+		return
+	}
+	accessToken := parts[1]
+
+	// Build a custom request to Supabase logout endpoint using the user's own token
+	req, err := http.NewRequest(http.MethodPost, supabaseURL+"/auth/v1/logout", nil)
+	if err != nil {
+		respond(w, 500, false, "Failed to create logout request: "+err.Error(), nil)
+		return
+	}
+
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		respond(w, 500, false, "Supabase logout request failed: "+err.Error(), nil)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var result interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		respond(w, resp.StatusCode, false, "Supabase logout failed", result)
+		return
+	}
+
+	respond(w, 200, true, "Signed out successfully", nil)
 }
 
 // ========================
