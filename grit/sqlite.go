@@ -5,30 +5,55 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
-// OpenCollection opens a sqlite db per collection
+// ========================
+// Per-collection DB cache
+// ========================
+
+var (
+	dbCache   = map[string]*gorm.DB{}
+	dbCacheMu sync.Mutex
+)
+
+// OpenCollection returns a cached *gorm.DB for the given collection name.
+// The SQLite file (<name>.db) is created automatically on first access.
+// Uses modernc.org/sqlite — pure Go, no CGO/gcc required.
 func OpenCollection(name string) (*gorm.DB, interface{}, error) {
 
 	model := models[name]
 	if model == nil {
-		return nil, nil, fmt.Errorf("model not registered: %s", name)
+		return nil, nil, fmt.Errorf(
+			"model not registered: %q — call grit.RegisterModel(%q, &YourStruct{}) before starting the server",
+			name, name,
+		)
+	}
+
+	dbCacheMu.Lock()
+	defer dbCacheMu.Unlock()
+
+	if db, ok := dbCache[name]; ok {
+		return db, model, nil
 	}
 
 	dbPath := fmt.Sprintf("%s.db", name)
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to open %s: %w", dbPath, err)
 	}
 
-	// auto create table
+	// enable WAL mode — better concurrency, no exclusive locks
+	db.Exec("PRAGMA journal_mode=WAL;")
+
 	if err := db.AutoMigrate(model); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("AutoMigrate %s: %w", name, err)
 	}
 
+	dbCache[name] = db
 	return db, model, nil
 }
 

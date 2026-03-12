@@ -1,8 +1,11 @@
 package grit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +17,9 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"google.golang.org/api/option"
 )
+
+// Firebase Web API Key (required for email/password sign-in)
+var firebaseAPIKey string
 
 // ========================
 // Firebase Context Keys
@@ -66,7 +72,7 @@ func FirebaseInitAdmin(credPath string) error {
 //
 // This is the recommended way to initialize Firebase in your main():
 //
-//	grit.InitFirebase("serviceAccountKey.json", "your-project-id")
+//	grit.InitFirebase("serviceAccountKey.json", "your-project-id", "your-api-key")
 //
 // credPath  — path to your serviceAccountKey.json file.
 //
@@ -74,8 +80,13 @@ func FirebaseInitAdmin(credPath string) error {
 //
 // projectID — your Firebase project ID (visible in Firebase Console).
 //
+// apiKey    — your Firebase Web API Key (Firebase Console → Project Settings → General).
+//
 // Calls log.Fatal on any error so the server never starts in a broken state.
-func InitFirebase(credPath, projectID string) {
+func InitFirebase(credPath, projectID, apiKey string) {
+	// Store API key for email/password sign-in
+	firebaseAPIKey = apiKey
+
 	// ── Firebase Admin SDK ────────────────────────────────────
 	if err := FirebaseInitAdmin(credPath); err != nil {
 		if os.IsNotExist(err) {
@@ -233,6 +244,131 @@ func FirebaseSigninHandler(jwtSecret string) http.HandlerFunc {
 			"user": map[string]interface{}{
 				"uid":   decoded.UID,
 				"email": decoded.Claims["email"],
+			},
+		})
+	}
+}
+
+// ========================
+// SIGNIN WITH EMAIL/PASSWORD — Direct sign-in using Firebase REST API
+// ========================
+
+// FirebaseSigninWithEmailHandler signs in a user with email and password directly
+// using the Firebase Auth REST API, then issues a signed app-level JWT.
+//
+// This is the recommended sign-in handler for server-side apps:
+//
+//	POST /firebase/signin
+//	{ "email": "user@example.com", "password": "secret123" }
+//
+// Response:
+//
+//	{
+//	  "success": true,
+//	  "message": "Signin successful",
+//	  "data": {
+//	    "token": "<app_jwt>",
+//	    "user": { "uid": "...", "email": "..." }
+//	  }
+//	}
+func FirebaseSigninWithEmailHandler(jwtSecret string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, r, "POST")
+			return
+		}
+
+		if firebaseAPIKey == "" {
+			respond(w, 500, false, "Firebase API key not configured. Pass it to grit.InitFirebase().", nil)
+			return
+		}
+
+		var body struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			respond(w, 400, false, "Invalid request body", nil)
+			return
+		}
+
+		if body.Email == "" || body.Password == "" {
+			respond(w, 400, false, "Email and password are required", nil)
+			return
+		}
+
+		// Call Firebase Auth REST API to sign in with email/password
+		firebaseURL := fmt.Sprintf(
+			"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s",
+			firebaseAPIKey,
+		)
+
+		reqBody, _ := json.Marshal(map[string]interface{}{
+			"email":             body.Email,
+			"password":          body.Password,
+			"returnSecureToken": true,
+		})
+
+		resp, err := http.Post(firebaseURL, "application/json", bytes.NewBuffer(reqBody))
+		if err != nil {
+			respond(w, 500, false, "Failed to connect to Firebase", nil)
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != 200 {
+			// Parse Firebase error
+			var firebaseErr struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			json.Unmarshal(respBody, &firebaseErr)
+
+			errMsg := "Invalid email or password"
+			if firebaseErr.Error.Message != "" {
+				switch firebaseErr.Error.Message {
+				case "EMAIL_NOT_FOUND":
+					errMsg = "No account found with this email"
+				case "INVALID_PASSWORD":
+					errMsg = "Incorrect password"
+				case "USER_DISABLED":
+					errMsg = "This account has been disabled"
+				case "INVALID_LOGIN_CREDENTIALS":
+					errMsg = "Invalid email or password"
+				default:
+					errMsg = firebaseErr.Error.Message
+				}
+			}
+
+			respond(w, 401, false, errMsg, nil)
+			return
+		}
+
+		// Parse successful response
+		var firebaseResp struct {
+			LocalId string `json:"localId"` // UID
+			Email   string `json:"email"`
+			IdToken string `json:"idToken"`
+		}
+
+		if err := json.Unmarshal(respBody, &firebaseResp); err != nil {
+			respond(w, 500, false, "Failed to parse Firebase response", nil)
+			return
+		}
+
+		// Issue our own app-level JWT
+		token := buildFirebaseJWT(firebaseResp.LocalId, firebaseResp.Email, jwtSecret)
+
+		respond(w, 200, true, "Signin successful", map[string]interface{}{
+			"token": token,
+			"user": map[string]interface{}{
+				"uid":   firebaseResp.LocalId,
+				"email": firebaseResp.Email,
 			},
 		})
 	}

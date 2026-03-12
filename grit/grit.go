@@ -41,10 +41,17 @@ var FirebaseInit = FirebaseInitAdmin
 // InitFirebase is defined in firebase_auth.go.
 
 // FirebaseSignup creates a user in Firebase and issues an app JWT.
-var FirebaseSignup = FirebaseSignupHandler
+var FirebaseSignupWithEmail = FirebaseSignupHandler
 
 // FirebaseSignin verifies a Firebase ID Token (from client SDK) and issues an app JWT.
 var FirebaseSignin = FirebaseSigninHandler
+
+// FirebaseSigninWithEmail signs in with email+password via the Firebase REST API
+// and issues an app JWT. No client SDK needed — the recommended server-side handler.
+//
+//	POST /auth/signin
+//	{ "email": "user@example.com", "password": "secret123" }
+var FirebaseSigninWithEmail = FirebaseSigninWithEmailHandler
 
 // FirebaseMe returns the authenticated user's profile from the JWT context.
 // Route must be wrapped with FirebaseProtected middleware:

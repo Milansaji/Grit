@@ -429,3 +429,139 @@ func FirestoreWhere(name, field, operator string) http.HandlerFunc {
 		respond(w, 200, true, "Fetched successfully", results)
 	}
 }
+
+// ========================
+// Direct Firestore Utility Functions
+// ========================
+// These functions are for programmatic use in custom handlers.
+
+// FirestoreDocRef wraps a Firestore document reference with its ID.
+type FirestoreDocRef struct {
+	ID string
+}
+
+// FirestoreCreate creates a new document in a Firestore collection and returns
+// a reference with the auto-generated ID.
+//
+// Usage:
+//
+//	doc, err := grit.FirestoreCreate("todos", map[string]interface{}{
+//	    "title": "Buy groceries",
+//	    "completed": false,
+//	})
+//	fmt.Println(doc.ID) // auto-generated document ID
+func FirestoreCreate(collection string, data map[string]interface{}) (*FirestoreDocRef, error) {
+	if firestoreClient == nil {
+		return nil, ErrFirestoreNotInitialized
+	}
+
+	ref, _, err := firestoreClient.Collection(collection).Add(context.Background(), data)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FirestoreDocRef{ID: ref.ID}, nil
+}
+
+// FirestoreGetByIDDirect fetches a single document by its ID.
+// Returns the document data as a map, or an error if not found.
+//
+// Usage:
+//
+//	data, err := grit.FirestoreGetByIDDirect("todos", "abc123")
+func FirestoreGetByIDDirect(collection, id string) (map[string]interface{}, error) {
+	if firestoreClient == nil {
+		return nil, ErrFirestoreNotInitialized
+	}
+
+	doc, err := firestoreClient.Collection(collection).Doc(id).Get(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	data := doc.Data()
+	data["id"] = doc.Ref.ID
+	return data, nil
+}
+
+// FirestoreUpdate updates (merges) fields on an existing document.
+// Only the provided fields are updated — other fields are left untouched.
+//
+// Usage:
+//
+//	err := grit.FirestoreUpdate("todos", "abc123", map[string]interface{}{
+//	    "completed": true,
+//	})
+func FirestoreUpdateDirect(collection, id string, updates map[string]interface{}) error {
+	if firestoreClient == nil {
+		return ErrFirestoreNotInitialized
+	}
+
+	_, err := firestoreClient.Collection(collection).Doc(id).Set(
+		context.Background(),
+		updates,
+		firestore.MergeAll,
+	)
+	return err
+}
+
+// FirestoreDeleteDirect deletes a document by its ID.
+//
+// Usage:
+//
+//	err := grit.FirestoreDeleteDirect("todos", "abc123")
+func FirestoreDeleteDirect(collection, id string) error {
+	if firestoreClient == nil {
+		return ErrFirestoreNotInitialized
+	}
+
+	_, err := firestoreClient.Collection(collection).Doc(id).Delete(context.Background())
+	return err
+}
+
+// FirestoreGetAllWhere fetches all documents where a field matches a value.
+//
+// Usage:
+//
+//	todos, err := grit.FirestoreGetAllWhere("todos", "user_id", "==", "uid123")
+func FirestoreGetAllWhere(collection, field, operator string, value interface{}) ([]map[string]interface{}, error) {
+	if firestoreClient == nil {
+		return nil, ErrFirestoreNotInitialized
+	}
+
+	iter := firestoreClient.Collection(collection).
+		Where(field, operator, value).
+		Documents(context.Background())
+	defer iter.Stop()
+
+	var results []map[string]interface{}
+
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			break
+		}
+		data := doc.Data()
+		data["id"] = doc.Ref.ID
+		results = append(results, data)
+	}
+
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+
+	return results, nil
+}
+
+// ErrFirestoreNotInitialized is returned when Firestore functions are called
+// before FirestoreInitClient().
+var ErrFirestoreNotInitialized = &FirestoreError{Message: "Firestore not initialized. Call grit.FirestoreInit() first."}
+
+// FirestoreError represents a Firestore-related error.
+type FirestoreError struct {
+	Message string
+}
+
+func (e *FirestoreError) Error() string {
+	return e.Message
+}

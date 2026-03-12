@@ -2,15 +2,16 @@ package grit
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -61,11 +62,14 @@ func InitSQLite() error {
 
 	db, err := gorm.Open(sqlite.Open("auth.db"), &gorm.Config{})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open auth.db: %w — ensure the process has write permission to the working directory", err)
 	}
 
+	// WAL mode — better concurrency, prevents file-locking on multi-goroutine access
+	db.Exec("PRAGMA journal_mode=WAL;")
+
 	if err := db.AutoMigrate(&User{}); err != nil {
-		return err
+		return fmt.Errorf("AutoMigrate failed: %w", err)
 	}
 
 	sqliteDB = db
