@@ -209,12 +209,23 @@ func GritD(name string) http.HandlerFunc {
 			return
 		}
 
-		var body struct {
-			ID uint `json:"id"`
+		// Try query parameter first, then fall back to JSON body
+		var id uint
+		if idStr := r.URL.Query().Get("id"); idStr != "" {
+			parsed, _ := strconv.Atoi(idStr)
+			id = uint(parsed)
+		}
+		if id == 0 {
+			var body struct {
+				ID uint `json:"id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				id = body.ID
+			}
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == 0 {
-			respond(w, 400, false, "Invalid ID", nil)
+		if id == 0 {
+			respond(w, 400, false, "id is required (as ?id= query param or in JSON body)", nil)
 			return
 		}
 
@@ -225,7 +236,7 @@ func GritD(name string) http.HandlerFunc {
 		}
 
 		obj := clone(model)
-		result := db.Delete(obj, "id = ?", body.ID)
+		result := db.Delete(obj, "id = ?", id)
 
 		if result.RowsAffected == 0 {
 			respond(w, 404, false, "Record not found", nil)

@@ -253,16 +253,23 @@ func MongoD(name string) http.HandlerFunc {
 			return
 		}
 
-		var body struct {
-			ID string `json:"id"`
+		// Try query parameter first, then fall back to JSON body
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			var body struct {
+				ID string `json:"id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				idStr = body.ID
+			}
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
-			respond(w, 400, false, "ID required", nil)
+		if idStr == "" {
+			respond(w, 400, false, "id is required (as ?id= query param or in JSON body)", nil)
 			return
 		}
 
-		objID, err := primitive.ObjectIDFromHex(body.ID)
+		objID, err := primitive.ObjectIDFromHex(idStr)
 		if err != nil {
 			respond(w, 400, false, "Invalid ID format", nil)
 			return

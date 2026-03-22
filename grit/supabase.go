@@ -501,12 +501,14 @@ func SupabaseU(name string) http.HandlerFunc {
 // DELETE — DELETE /rest/v1/{table}?id=eq.{id}
 // ========================
 
-// SupabaseD deletes a record from a Supabase table. Requires `id` in the JSON body.
+// SupabaseD deletes a record from a Supabase table.
+// Accepts the ID from either a query parameter (?id=<value>) or JSON body ({"id":"<value>"}).
 //
 // Usage:
 //
 //	r.Delete("/post", grit.SupabaseD("posts"))
 //
+// Query:  DELETE /post?id=1
 // Body:   { "id": 1 }
 func SupabaseD(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -516,16 +518,21 @@ func SupabaseD(name string) http.HandlerFunc {
 			return
 		}
 
-		var body struct {
-			ID interface{} `json:"id"`
+		// Try query parameter first, then fall back to JSON body
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			var body struct {
+				ID interface{} `json:"id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.ID != nil {
+				id = fmt.Sprintf("%v", body.ID)
+			}
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == nil {
-			respond(w, 400, false, "id is required in body", nil)
+		if id == "" {
+			respond(w, 400, false, "id is required (as ?id= query param or in JSON body)", nil)
 			return
 		}
-
-		id := fmt.Sprintf("%v", body.ID)
 
 		resp, err := supabaseRequest(http.MethodDelete, "/rest/v1/"+name+"?id=eq."+id, nil)
 		if err != nil {

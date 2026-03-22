@@ -334,12 +334,13 @@ func FirestoreU(name string) http.HandlerFunc {
 // ========================
 
 // FirestoreD deletes a document from a Firestore collection by its ID.
-// Requires an "id" field in the JSON body.
+// Accepts the ID from either a query parameter (?id=<docID>) or JSON body ({"id":"<docID>"}).
 //
 // Usage:
 //
 //	r.Delete("/post", auth(grit.FirestoreD("posts")))
 //
+// Query:  DELETE /post?id=<docID>
 // Body:   { "id": "<docID>" }
 func FirestoreD(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -353,16 +354,23 @@ func FirestoreD(name string) http.HandlerFunc {
 			return
 		}
 
-		var body struct {
-			ID string `json:"id"`
+		// Try query parameter first, then fall back to JSON body
+		docID := r.URL.Query().Get("id")
+		if docID == "" {
+			var body struct {
+				ID string `json:"id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				docID = body.ID
+			}
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
-			respond(w, 400, false, "id is required in body", nil)
+		if docID == "" {
+			respond(w, 400, false, "id is required (as ?id= query param or in JSON body)", nil)
 			return
 		}
 
-		_, err := firestoreClient.Collection(name).Doc(body.ID).Delete(context.Background())
+		_, err := firestoreClient.Collection(name).Doc(docID).Delete(context.Background())
 		if err != nil {
 			respond(w, 500, false, "Firestore error: "+err.Error(), nil)
 			return
