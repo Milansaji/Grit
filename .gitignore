@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 
 
 # Firebase credentials — NEVER commit this
