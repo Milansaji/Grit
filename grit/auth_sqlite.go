@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -16,25 +15,31 @@ import (
 )
 
 /* =========================
-   TOKEN BLACKLIST (SQLite)
+   TOKEN REVOCATION (SQLite)
 ========================= */
 
-var (
-	sqliteTokenBlacklist = map[string]struct{}{}
-	sqliteBlacklistMu    sync.RWMutex
-)
+type Revocation struct {
+	Token     string `gorm:"primaryKey"`
+	CreatedAt time.Time
+}
 
 func sqliteBlacklistAdd(token string) {
-	sqliteBlacklistMu.Lock()
-	defer sqliteBlacklistMu.Unlock()
-	sqliteTokenBlacklist[token] = struct{}{}
+	if sqliteDB == nil {
+		InitSQLite()
+	}
+	sqliteDB.Create(&Revocation{
+		Token:     token,
+		CreatedAt: time.Now(),
+	})
 }
 
 func sqliteBlacklistContains(token string) bool {
-	sqliteBlacklistMu.RLock()
-	defer sqliteBlacklistMu.RUnlock()
-	_, ok := sqliteTokenBlacklist[token]
-	return ok
+	if sqliteDB == nil {
+		InitSQLite()
+	}
+	var count int64
+	sqliteDB.Model(&Revocation{}).Where("token = ?", token).Count(&count)
+	return count > 0
 }
 
 /* =========================
@@ -68,7 +73,7 @@ func InitSQLite() error {
 	// WAL mode — better concurrency, prevents file-locking on multi-goroutine access
 	db.Exec("PRAGMA journal_mode=WAL;")
 
-	if err := db.AutoMigrate(&User{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Revocation{}); err != nil {
 		return fmt.Errorf("AutoMigrate failed: %w", err)
 	}
 

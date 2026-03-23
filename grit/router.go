@@ -33,33 +33,32 @@ func New() *Router {
 	return r
 }
 
-func (r *Router) Start(port string) error {
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-
-		if req.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+	if m, ok := r.routes[req.Method]; ok {
+		if h, ok := m[req.URL.Path]; ok {
+			h(w, req)
 			return
 		}
+	}
 
-		if m, ok := r.routes[req.Method]; ok {
-			if h, ok := m[req.URL.Path]; ok {
-				h(w, req)
-				return
-			}
-		}
+	HandleNotFound(w, req)
+}
 
-		log.Printf("%s[404]%s %s %s", Red, Reset, req.Method, req.URL.Path)
-		HandleNotFound(w, req)
-	})
-
-	h := loggingMiddleware(corsMiddleware(bodySizeLimiter(handler)))
+func (r *Router) Start(port string) error {
+	h := loggingMiddleware(corsMiddleware(bodySizeLimiter(r)))
 
 	log.Printf("%s🚀 Server http://localhost:%s%s", Green, port, Reset)
 	log.Printf("%s📘 Docs http://localhost:%s/docs%s", Blue, port, Reset)
 
-	http.Handle("/", h)
-	return http.ListenAndServe(":"+port, nil)
+	return http.ListenAndServe(":"+port, h)
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

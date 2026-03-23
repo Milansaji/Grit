@@ -1,6 +1,8 @@
 package grit
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // Router
 var NewRouter = New
@@ -83,6 +85,16 @@ var FirestoreInit = FirestoreInitClient
 
 // FirestoreC, FirestoreR, FirestoreGetByID, FirestoreU, FirestoreD, FirestoreWhere
 // are all defined in grit/firestore.go and are ready to use directly.
+
+// ========================
+// Unified CRUD
+// ========================
+
+// SetStore sets the default database backend for unified handlers ("sqlite" or "mongo").
+var SetStore = SetDefaultStore
+
+// C, R, U, D, GetByID are unified handlers that work with the default store.
+// They are exported from grit/store.go and are ready to use.
 
 // ========================
 // Utility Handlers
