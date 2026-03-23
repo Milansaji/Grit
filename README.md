@@ -1,14 +1,14 @@
 # Grit 🪨
 
 **A zero-boilerplate Go backend framework.**  
-Drop in auth, unified CRUD, and middleware for SQLite, MongoDB, Firebase, or Supabase — in minutes, not hours.
+Drop in auth, unified CRUD, AI/RAG, and middleware for SQLite, MongoDB, Firebase, or Supabase — in minutes, not hours.
 
 ---
 
 ## 💎 What's New in v2 (B.Tech Final Year Edition)
+- **AI & RAG Support**: Built-in vector search and LLM integration using Ollama.
 - **Unified CRUD API**: One set of handlers (`grit.C`, `grit.R`, etc.) for ALL 4 databases.
 - **Persistent Auth**: SQLite signouts now survive server restarts (database-backed).
-- **Testable Architecture**: Refactored router and core logic with a full unit test suite.
 - **Database Agnosticity**: Switch between SQLite, Mongo, Firestore, and Supabase with ONE line of code.
 
 ---
@@ -17,13 +17,10 @@ Drop in auth, unified CRUD, and middleware for SQLite, MongoDB, Firebase, or Sup
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Unified CRUD Helpers](#unified-crud-helpers-new)
+- [AI & RAG (NEW!)](#ai--rag-new)
+- [Unified CRUD Helpers](#unified-crud-helpers)
 - [Switching Databases](#switching-databases)
 - [Auth Providers](#auth-providers)
-  - [SQLite Auth](#-sqlite-auth)
-  - [Firebase Auth](#-firebase-auth)
-  - [Supabase Auth](#-supabase-auth)
-- [Middleware](#middleware)
 - [Complete Example](#complete-example)
 
 ---
@@ -69,13 +66,39 @@ func main() {
 }
 ```
 
-Visit `http://localhost:8080/docs` for auto-generated Swagger UI. ✅
+---
+
+## AI & RAG (NEW!) 🚀
+
+Grit now includes built-in support for **Retrieval-Augmented Generation** using local LLMs (via [Ollama](https://ollama.com/)).
+
+### 1. Vector Store & Handlers
+```go
+// Initialize an in-memory vector store
+store := grit.NewSimpleVectorStore()
+
+// Register AI handlers
+r.Post("/ingest", grit.RAGIngestHandler(store, "mxbai-embed-large"))
+r.Post("/chat",   grit.RAGQueryHandler(store, "mistral", "mxbai-embed-large"))
+```
+
+### 2. Manual LLM Access
+```go
+// Get a direct response from LLM
+response, err := grit.Prompt("mistral", "Why is Grit so fast?")
+
+// Generate embeddings
+vector, err := grit.Embed("mxbai-embed-large", "Grit 🪨")
+```
+
+> [!TIP]
+> Ensure Ollama is running at `http://localhost:11434`. You can override this using `grit.SetLLMBaseURL("url")` or the `OLLAMA_HOST` environment variable.
 
 ---
 
-## Unified CRUD Helpers (NEW!)
+## Unified CRUD Helpers
 
-Grit now provides a **Storage-Agnostic API**. You write the route once, and it works regardless of which database is plugged in.
+Grit provides a **Storage-Agnostic API**. You write the route once, and it works regardless of which database is plugged in.
 
 | Function | Method | Description |
 |----------|--------|-------------|
@@ -113,13 +136,15 @@ r.Post("/auth/signout", grit.Protect(jwtSecret)(grit.SignoutSQLiteHandler))
 ### 🔥 Firebase Auth
 ```go
 grit.InitFirebase("serviceAccountKey.json", "project-id")
-r.Post("/auth/signup", grit.FirebaseSignup(jwtSecret))
+r.Post("/auth/signup", grit.FirebaseSignupWithEmail(jwtSecret))
+r.Post("/auth/signin", grit.FirebaseSigninWithEmail(jwtSecret))
 ```
 
 ### ⚡ Supabase Auth
 ```go
 grit.SupabaseInit("https://xyz.supabase.co", "key")
 r.Post("/auth/signup", grit.SupabaseSignup(jwtSecret))
+r.Post("/auth/signin", grit.SupabaseSignin(jwtSecret))
 ```
 
 ---
@@ -129,13 +154,14 @@ r.Post("/auth/signup", grit.SupabaseSignup(jwtSecret))
 ```
 Grit/
 ├── grit/
-│   ├── store.go             # NEW: Unified Store Interface & Engines
+│   ├── rag.go               # NEW: RAG & Vector Search
+│   ├── llm.go               # NEW: Ollama/LLM Integration
+│   ├── store.go             # Unified Store Interface (Mongo, SQL, Firestore, Supabase)
 │   ├── grit.go              # Main public API surface
 │   ├── router.go            # Testable Router implementation
-│   ├── *_test.go            # Core unit test suite
-│   ├── ...                  # DB-specific drivers
-├── new_example.go           # Comprehensive unified example
-├── firebase_example.go      # Firebase-specific unified example
+├── firebase/
+│   ├── examples/
+│   │   ├── rag_server/      # AI Chatbot Example
 └── README.md
 ```
 
