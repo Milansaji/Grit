@@ -97,14 +97,19 @@ var SetStore = SetDefaultStore
 // They are exported from grit/store.go and are ready to use.
 
 // ========================
-// AI Agent
+// AI & MCP
 // ========================
 
 // AICrud is a handler that uses an LLM to execute CRUD operations from natural language.
 var AICrud = AICrudHandler
+
+// External AI (Cloud LLMs)
+var AI_OpenAI = PromptOpenAI
+var AI_Gemini = PromptGemini
 
 // Health is a ready-to-use health check handler.
 //
 //	r.Get("/health", grit.Health)
 //
 // HealthHandler is defined in helpers.go.
+var Health = HealthHandler

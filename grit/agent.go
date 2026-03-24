@@ -168,6 +168,22 @@ func executeAgentAction(a AgentAction, actorEmail, actorUID, userPrompt string) 
 			a.Data["author"] = actorName
 		}
 
+		if strings.EqualFold(a.Model, "tasks") {
+			if strings.TrimSpace(actorEmail) == "" && strings.TrimSpace(actorUID) == "" {
+				return nil, fmt.Errorf("unauthorized: authenticated user required to create tasks via AI")
+			}
+			if a.Data == nil {
+				a.Data = map[string]interface{}{}
+			}
+			a.Data["creator"] = actorName
+			if _, ok := a.Data["status"]; !ok {
+				a.Data["status"] = "todo"
+			}
+			if _, ok := a.Data["priority"]; !ok {
+				a.Data["priority"] = "medium"
+			}
+		}
+
 		obj := clone(s.GetModel())
 		dataJSON, _ := json.Marshal(a.Data)
 		if err := json.Unmarshal(dataJSON, obj); err != nil {
@@ -226,6 +242,28 @@ func executeAgentAction(a AgentAction, actorEmail, actorUID, userPrompt string) 
 			}
 		}
 
+		if strings.EqualFold(a.Model, "tasks") {
+			if strings.TrimSpace(actorEmail) == "" && strings.TrimSpace(actorUID) == "" {
+				return nil, fmt.Errorf("unauthorized: authenticated user required to update tasks via AI")
+			}
+			if a.Data == nil {
+				a.Data = map[string]interface{}{}
+			}
+			delete(a.Data, "creator")
+
+			if a.ID == nil {
+				resolvedID, err := resolveOwnTaskID(s, actorName, a.Data, userPrompt, a.Action)
+				if err != nil {
+					return nil, err
+				}
+				a.ID = resolvedID
+			}
+
+			if err := verifyTaskOwnership(s, a.ID, actorName); err != nil {
+				return nil, err
+			}
+		}
+
 		if a.ID == nil {
 			return nil, fmt.Errorf("id is required for update")
 		}
@@ -249,6 +287,24 @@ func executeAgentAction(a AgentAction, actorEmail, actorUID, userPrompt string) 
 			}
 
 			if err := verifyPostOwnership(s, a.ID, actorName); err != nil {
+				return nil, err
+			}
+		}
+
+		if strings.EqualFold(a.Model, "tasks") {
+			if strings.TrimSpace(actorEmail) == "" && strings.TrimSpace(actorUID) == "" {
+				return nil, fmt.Errorf("unauthorized: authenticated user required to delete tasks via AI")
+			}
+
+			if a.ID == nil {
+				resolvedID, err := resolveOwnTaskID(s, actorName, a.Data, userPrompt, a.Action)
+				if err != nil {
+					return nil, err
+				}
+				a.ID = resolvedID
+			}
+
+			if err := verifyTaskOwnership(s, a.ID, actorName); err != nil {
 				return nil, err
 			}
 		}
@@ -669,7 +725,55 @@ func inferModelFromPrompt(prompt string) string {
 		return "comments"
 	case strings.Contains(p, "question"):
 		return "questions"
+	case strings.Contains(p, "task"):
+		return "tasks"
 	default:
 		return ""
 	}
+}
+
+func resolveOwnTaskID(s Store, actorName string, data map[string]interface{}, prompt, action string) (interface{}, error) {
+	slice := makeSlice(s.GetModel())
+	if err := s.ReadAll(slice); err != nil {
+		return nil, err
+	}
+	targetTitle := extractMutationTargetTitle(prompt, data, action)
+	val := reflect.ValueOf(slice)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	candidates := make([]reflect.Value, 0)
+	for i := 0; i < val.Len(); i++ {
+		item := val.Index(i)
+		creator := fmt.Sprintf("%v", getFieldValue(item.Interface(), "creator"))
+		if !strings.EqualFold(strings.TrimSpace(creator), strings.TrimSpace(actorName)) {
+			continue
+		}
+		if targetTitle != "" {
+			title := fmt.Sprintf("%v", getFieldValue(item.Interface(), "title"))
+			if !strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(targetTitle)) {
+				continue
+			}
+		}
+		candidates = append(candidates, item)
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no matching task found for your profile")
+	}
+	if len(candidates) > 1 {
+		return nil, fmt.Errorf("multiple tasks found. Please provide id")
+	}
+	return getFieldValue(candidates[0].Interface(), "id"), nil
+}
+
+func verifyTaskOwnership(s Store, id interface{}, actorName string) error {
+	obj := clone(s.GetModel())
+	if err := s.GetByID(id, obj); err != nil {
+		return err
+	}
+	creator := fmt.Sprintf("%v", getFieldValue(obj, "creator"))
+	if !strings.EqualFold(strings.TrimSpace(creator), strings.TrimSpace(actorName)) {
+		return fmt.Errorf("forbidden: you can only modify your own tasks")
+	}
+	return nil
 }

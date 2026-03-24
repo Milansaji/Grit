@@ -450,20 +450,22 @@ type FirestoreDocRef struct {
 
 // FirestoreCreate creates a new document in a Firestore collection and returns
 // a reference with the auto-generated ID.
-//
-// Usage:
-//
-//	doc, err := grit.FirestoreCreate("todos", map[string]interface{}{
-//	    "title": "Buy groceries",
-//	    "completed": false,
-//	})
-//	fmt.Println(doc.ID) // auto-generated document ID
-func FirestoreCreate(collection string, data map[string]interface{}) (*FirestoreDocRef, error) {
+func FirestoreCreate(collection string, data interface{}) (*FirestoreDocRef, error) {
 	if firestoreClient == nil {
 		return nil, ErrFirestoreNotInitialized
 	}
 
-	ref, _, err := firestoreClient.Collection(collection).Add(context.Background(), data)
+	var m map[string]interface{}
+	// Bridge to map to ensure it's compatible with Firestore and handles struct tags
+	b, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+
+	ref, _, err := firestoreClient.Collection(collection).Add(context.Background(), m)
 	if err != nil {
 		return nil, err
 	}
@@ -492,22 +494,24 @@ func FirestoreGetByIDDirect(collection, id string) (map[string]interface{}, erro
 	return data, nil
 }
 
-// FirestoreUpdate updates (merges) fields on an existing document.
-// Only the provided fields are updated — other fields are left untouched.
-//
-// Usage:
-//
-//	err := grit.FirestoreUpdate("todos", "abc123", map[string]interface{}{
-//	    "completed": true,
-//	})
-func FirestoreUpdateDirect(collection, id string, updates map[string]interface{}) error {
+// FirestoreUpdateDirect updates (merges) fields on an existing document.
+func FirestoreUpdateDirect(collection, id string, updates interface{}) error {
 	if firestoreClient == nil {
 		return ErrFirestoreNotInitialized
 	}
 
-	_, err := firestoreClient.Collection(collection).Doc(id).Set(
+	var m map[string]interface{}
+	b, err := json.Marshal(updates)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+
+	_, err = firestoreClient.Collection(collection).Doc(id).Set(
 		context.Background(),
-		updates,
+		m,
 		firestore.MergeAll,
 	)
 	return err
