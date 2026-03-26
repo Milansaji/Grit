@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"cloud.google.com/go/firestore"
@@ -15,6 +16,7 @@ import (
 // Store defines the unified interface for database operations.
 type Store interface {
 	Create(obj interface{}) error
+	BulkCreate(objs interface{}) error
 	ReadAll(slice interface{}) error
 	GetByID(id interface{}, obj interface{}) error
 	Update(id interface{}, payload map[string]interface{}) error
@@ -45,6 +47,10 @@ func (s *SQLiteStore) Create(obj interface{}) error {
 		return err
 	}
 	return db.Create(obj).Error
+}
+
+func (s *SQLiteStore) BulkCreate(objs interface{}) error {
+	return s.Create(objs) // GORM Create handles slices for batch insert
 }
 
 func (s *SQLiteStore) ReadAll(slice interface{}) error {
@@ -101,6 +107,27 @@ func (s *MongoStore) Create(obj interface{}) error {
 		return err
 	}
 	_, err = col.InsertOne(context.Background(), obj)
+	return err
+}
+
+func (s *MongoStore) BulkCreate(objs interface{}) error {
+	col, err := MongoCollection(s.name)
+	if err != nil {
+		return err
+	}
+	// Convert slice to []interface{}
+	v := reflect.ValueOf(objs)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Slice {
+		return fmt.Errorf("bulk create requires a slice")
+	}
+	var items []interface{}
+	for i := 0; i < v.Len(); i++ {
+		items = append(items, v.Index(i).Interface())
+	}
+	_, err = col.InsertMany(context.Background(), items)
 	return err
 }
 
@@ -204,6 +231,31 @@ func (s *FirestoreStore) Create(obj interface{}) error {
 	return err
 }
 
+func (s *FirestoreStore) BulkCreate(objs interface{}) error {
+	if firestoreClient == nil {
+		return ErrFirestoreNotInitialized
+	}
+	v := reflect.ValueOf(objs)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Slice {
+		return fmt.Errorf("bulk create requires a slice")
+	}
+
+	batch := firestoreClient.Batch()
+	ctx := context.Background()
+	for i := 0; i < v.Len(); i++ {
+		b, _ := json.Marshal(v.Index(i).Interface())
+		var data map[string]interface{}
+		json.Unmarshal(b, &data)
+		ref := firestoreClient.Collection(s.name).NewDoc()
+		batch.Set(ref, data)
+	}
+	_, err := batch.Commit(ctx)
+	return err
+}
+
 func (s *FirestoreStore) ReadAll(slice interface{}) error {
 	if firestoreClient == nil {
 		return ErrFirestoreNotInitialized
@@ -292,6 +344,10 @@ func (s *SupabaseStore) Create(obj interface{}) error {
 		return fmt.Errorf("supabase error: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (s *SupabaseStore) BulkCreate(objs interface{}) error {
+	return s.Create(objs) // Supabase handles array POST
 }
 
 func (s *SupabaseStore) ReadAll(slice interface{}) error {
@@ -387,16 +443,36 @@ func C(name string) http.HandlerFunc {
 			respond(w, 500, false, "model not registered", nil)
 			return
 		}
-		obj := clone(s.GetModel())
-		if err := json.NewDecoder(r.Body).Decode(obj); err != nil {
+
+		var raw json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			respond(w, 400, false, "invalid request body", nil)
 			return
 		}
-		if err := s.Create(obj); err != nil {
-			respond(w, 500, false, err.Error(), nil)
-			return
+
+		if len(raw) > 0 && raw[0] == '[' {
+			slice := makeSlice(s.GetModel())
+			if err := json.Unmarshal(raw, slice); err != nil {
+				respond(w, 400, false, "invalid bulk request body", nil)
+				return
+			}
+			if err := s.BulkCreate(slice); err != nil {
+				respond(w, 500, false, err.Error(), nil)
+				return
+			}
+			respond(w, 201, true, "bulk created successfully", slice)
+		} else {
+			obj := clone(s.GetModel())
+			if err := json.Unmarshal(raw, obj); err != nil {
+				respond(w, 400, false, "invalid request body", nil)
+				return
+			}
+			if err := s.Create(obj); err != nil {
+				respond(w, 500, false, err.Error(), nil)
+				return
+			}
+			respond(w, 201, true, "created successfully", obj)
 		}
-		respond(w, 201, true, "created successfully", obj)
 	}
 }
 

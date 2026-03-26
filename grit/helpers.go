@@ -55,3 +55,12 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
+
+// RenderHandler is a ready-to-use handler that serves a local file.
+//
+//	r.Get("/", grit.Render("index.html"))
+func RenderHandler(file string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, file)
+	}
+}

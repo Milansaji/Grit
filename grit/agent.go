@@ -29,9 +29,16 @@ func cleanAIJSON(s string) string {
 		s = strings.TrimSuffix(s, "```")
 	}
 
-	// 2. Extract first '{' to last '}' to strip preamble/postamble
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
+	// 2. Find the boundaries of the JSON (either { or [)
+	start := strings.IndexAny(s, "{[")
+	var end int
+	if start != -1 {
+		if s[start] == '{' {
+			end = strings.LastIndex(s, "}")
+		} else {
+			end = strings.LastIndex(s, "]")
+		}
+	}
 	if start != -1 && end != -1 && end > start {
 		s = s[start : end+1]
 	}
@@ -87,6 +94,7 @@ IMPORTANT: Return ONLY a valid JSON object.
 - Dates MUST be in RFC3339 format (e.g., "2026-04-30T00:00:00Z").
 - NO explanations or preamble.
 
+For multiple operations, return an array of these objects.
 {
   "action": "create" | "read_all" | "read_by_id" | "update" | "delete",
   "model": "model_name",
@@ -104,52 +112,57 @@ JSON:`, context, req.Prompt)
 			return
 		}
 
-		// 4. Parse Action
-		var action AgentAction
-		// Clean the response in case LLM adds markdown, comments, or fluff
+		// 4. Parse Action(s)
 		cleanJSON := cleanAIJSON(response)
+		var actions []AgentAction
 
-		if err := json.Unmarshal([]byte(cleanJSON), &action); err != nil {
-			respond(w, http.StatusBadRequest, false, "Failed to parse AI action", map[string]interface{}{
-				"ai_raw": response,
-			})
-			return
-		}
-
-		// Deterministic intent fallback from user prompt (prevents LLM misclassification,
-		// e.g., edit/delete accidentally returned as create).
-		overrideAction, ok := inferActionFromPrompt(req.Prompt)
-		if ok {
-			action.Action = overrideAction
-		}
-
-		if action.Model == "" {
-			action.Model = inferModelFromPrompt(req.Prompt)
-		}
-
-		action.Action = normalizeActionName(action.Action)
-		action.Model = normalizeModelName(action.Model)
-
-		// Fallback: if user asked for filtered read but model didn't emit data,
-		// infer simple field filters from the original prompt.
-		if action.Action == "read_all" && len(action.Data) == 0 {
-			action.Data = inferReadAllFilters(req.Prompt, action.Model)
+		if strings.HasPrefix(cleanJSON, "[") {
+			if err := json.Unmarshal([]byte(cleanJSON), &actions); err != nil {
+				respond(w, http.StatusBadRequest, false, "Failed to parse AI bulk actions", map[string]interface{}{"ai_raw": response})
+				return
+			}
+		} else {
+			var action AgentAction
+			if err := json.Unmarshal([]byte(cleanJSON), &action); err != nil {
+				respond(w, http.StatusBadRequest, false, "Failed to parse AI action", map[string]interface{}{"ai_raw": response})
+				return
+			}
+			actions = append(actions, action)
 		}
 
 		actorEmail, _ := r.Context().Value(FirebaseEmailKey).(string)
 		actorUID, _ := r.Context().Value(FirebaseUIDKey).(string)
 
-		// 5. Execute Action
-		action.Data = normalizeAgentData(action.Data)
-		result, err := executeAgentAction(action, actorEmail, actorUID, req.Prompt)
-		if err != nil {
-			respond(w, http.StatusBadRequest, false, err.Error(), map[string]interface{}{"action": action})
-			return
+		var results []interface{}
+		for _, action := range actions {
+			// Deterministic intent fallback and normalization
+			overrideAction, ok := inferActionFromPrompt(req.Prompt)
+			if ok {
+				action.Action = overrideAction
+			}
+			if action.Model == "" {
+				action.Model = inferModelFromPrompt(req.Prompt)
+			}
+			action.Action = normalizeActionName(action.Action)
+			action.Model = normalizeModelName(action.Model)
+
+			if action.Action == "read_all" && len(action.Data) == 0 {
+				action.Data = inferReadAllFilters(req.Prompt, action.Model)
+			}
+
+			// 5. Execute Action
+			action.Data = normalizeAgentData(action.Data)
+			result, err := executeAgentAction(action, actorEmail, actorUID, req.Prompt)
+			if err != nil {
+				respond(w, http.StatusBadRequest, false, err.Error(), map[string]interface{}{"action": action, "results": results})
+				return
+			}
+			results = append(results, result)
 		}
 
-		respond(w, http.StatusOK, true, "Action executed successfully", map[string]interface{}{
-			"action": action,
-			"result": result,
+		respond(w, http.StatusOK, true, "Actions executed successfully", map[string]interface{}{
+			"actions": actions,
+			"results": results,
 		})
 	}
 }

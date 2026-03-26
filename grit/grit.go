@@ -113,3 +113,6 @@ var AI_Gemini = PromptGemini
 //
 // HealthHandler is defined in helpers.go.
 var Health = HealthHandler
+
+// Render is a handler that serves a local file (e.g. index.html).
+var Render = RenderHandler
