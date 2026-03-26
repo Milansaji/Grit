@@ -1,6 +1,7 @@
 package grit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -255,7 +256,29 @@ func ProtectSQLite(jwtSecret string) func(http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			next(w, r)
+			claims, ok := token.Claims.(jwt.MapClaims)
+			if !ok {
+				http.Error(w, "invalid token claims", 401)
+				return
+			}
+
+			// Inject claims into context for AI Agent compatibility
+			ctx := r.Context()
+			if uid, ok := claims["sub"]; ok {
+				ctx = context.WithValue(ctx, FirebaseUIDKey, fmt.Sprintf("%v", uid))
+			}
+			if email, ok := claims["email"].(string); ok {
+				ctx = context.WithValue(ctx, FirebaseEmailKey, email)
+			}
+			if perms, ok := claims["permissions"].([]interface{}); ok {
+				permsStr := make([]string, len(perms))
+				for i, p := range perms {
+					permsStr[i] = fmt.Sprintf("%v", p)
+				}
+				ctx = context.WithValue(ctx, FirebasePermissionsKey, permsStr)
+			}
+
+			next(w, r.WithContext(ctx))
 		}
 	}
 }
