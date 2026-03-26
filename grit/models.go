@@ -1,7 +1,6 @@
 package grit
 
 import (
-	"log"
 	"reflect"
 	"strings"
 )
@@ -13,7 +12,6 @@ var models = map[string]interface{}{}
 func RegisterModel(name string, model interface{}) {
 	key := strings.ToLower(strings.TrimSpace(name))
 	models[key] = model
-	log.Printf("📦 Model registered: %s (original: %s)", key, name)
 }
 
 // clone creates a new instance of a model

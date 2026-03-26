@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 
@@ -365,13 +364,8 @@ func NewStore(name string) Store {
 	key := strings.ToLower(strings.TrimSpace(name))
 	model := models[key]
 	if model == nil {
-		log.Printf("❌ Model NOT found in registry: %s (original: %s)", key, name)
-		for k := range models {
-			log.Printf("   Available model: %s", k)
-		}
 		return nil
 	}
-	log.Printf("✅ Model found in registry: %s", key)
 	switch defaultStoreType {
 	case "mongo":
 		return &MongoStore{name: name, model: model}

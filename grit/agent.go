@@ -82,7 +82,11 @@ Available Models and their fields:
 Your task is to convert the user's natural language request into a JSON action.
 For 'read_all', you can include key-value pairs in 'data' to filter the results (e.g., { "author": "sayana" }).
 
-IMPORTANT: Return ONLY a valid JSON object. DO NOT include any comments (// or /* */) or explanations in your output.
+IMPORTANT: Return ONLY a valid JSON object. 
+- DO NOT include any comments (// or /* */).
+- Dates MUST be in RFC3339 format (e.g., "2026-04-30T00:00:00Z").
+- NO explanations or preamble.
+
 {
   "action": "create" | "read_all" | "read_by_id" | "update" | "delete",
   "model": "model_name",
@@ -136,6 +140,7 @@ JSON:`, context, req.Prompt)
 		actorUID, _ := r.Context().Value(FirebaseUIDKey).(string)
 
 		// 5. Execute Action
+		action.Data = normalizeAgentData(action.Data)
 		result, err := executeAgentAction(action, actorEmail, actorUID, req.Prompt)
 		if err != nil {
 			respond(w, http.StatusBadRequest, false, err.Error(), map[string]interface{}{"action": action})
@@ -804,4 +809,22 @@ func verifyTaskOwnership(s Store, id interface{}, actorName string) error {
 		return fmt.Errorf("forbidden: you can only modify your own tasks")
 	}
 	return nil
+}
+
+// normalizeAgentData fixes common AI formatting issues in the data payload
+func normalizeAgentData(data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	for k, v := range data {
+		if s, ok := v.(string); ok {
+			// Fix missing 'Z' in ISO dates (e.g. 2026-04-30T00:00:00 -> 2026-04-30T00:00:00Z)
+			dateRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$`)
+			if dateRe.MatchString(s) {
+				data[k] = s + "Z"
+			}
+		}
+	}
+	return data
 }
