@@ -18,6 +18,39 @@ type AgentAction struct {
 }
 
 // AICrudHandler returns a handler that parses natural language and executes CRUD
+func cleanAIJSON(s string) string {
+	// 1. Remove markdown code blocks
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```json") {
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimSuffix(s, "```")
+	} else if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```")
+		s = strings.TrimSuffix(s, "```")
+	}
+
+	// 2. Extract first '{' to last '}' to strip preamble/postamble
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start != -1 && end != -1 && end > start {
+		s = s[start : end+1]
+	}
+
+	// 3. Strip single-line comments (// ...)
+	reComments := regexp.MustCompile(`(?m)//.*$`)
+	s = reComments.ReplaceAllString(s, "")
+
+	// 4. Strip multi-line comments (/* ... */)
+	reMultiComments := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	s = reMultiComments.ReplaceAllString(s, "")
+
+	// 5. Fix trailing commas (e.g. { "a": 1, })
+	reTrailingCommas := regexp.MustCompile(`,(\s*[\}\]])`)
+	s = reTrailingCommas.ReplaceAllString(s, "$1")
+
+	return strings.TrimSpace(s)
+}
+
 func AICrudHandler(llmModel string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -49,7 +82,7 @@ Available Models and their fields:
 Your task is to convert the user's natural language request into a JSON action.
 For 'read_all', you can include key-value pairs in 'data' to filter the results (e.g., { "author": "sayana" }).
 
-Return ONLY a valid JSON object with the following structure:
+IMPORTANT: Return ONLY a valid JSON object. DO NOT include any comments (// or /* */) or explanations in your output.
 {
   "action": "create" | "read_all" | "read_by_id" | "update" | "delete",
   "model": "model_name",
@@ -69,13 +102,8 @@ JSON:`, context, req.Prompt)
 
 		// 4. Parse Action
 		var action AgentAction
-		// Clean the response in case LLM adds markdown or fluff
-		cleanJSON := strings.TrimSpace(response)
-		if strings.HasPrefix(cleanJSON, "```json") {
-			cleanJSON = strings.TrimPrefix(cleanJSON, "```json")
-			cleanJSON = strings.TrimSuffix(cleanJSON, "```")
-		}
-		cleanJSON = strings.TrimSpace(cleanJSON)
+		// Clean the response in case LLM adds markdown, comments, or fluff
+		cleanJSON := cleanAIJSON(response)
 
 		if err := json.Unmarshal([]byte(cleanJSON), &action); err != nil {
 			respond(w, http.StatusBadRequest, false, "Failed to parse AI action", map[string]interface{}{

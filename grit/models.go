@@ -1,13 +1,19 @@
 package grit
 
-import "reflect"
+import (
+	"log"
+	"reflect"
+	"strings"
+)
 
 // registered models
 var models = map[string]interface{}{}
 
-// RegisterModel binds collection name to model
+// RegisterModel binds collection name to model (case-insensitive)
 func RegisterModel(name string, model interface{}) {
-	models[name] = model
+	key := strings.ToLower(strings.TrimSpace(name))
+	models[key] = model
+	log.Printf("📦 Model registered: %s (original: %s)", key, name)
 }
 
 // clone creates a new instance of a model

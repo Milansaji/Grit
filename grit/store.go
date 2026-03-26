@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 
 	"cloud.google.com/go/firestore"
 	"go.mongodb.org/mongo-driver/bson"
@@ -360,10 +362,16 @@ func (s *SupabaseStore) GetModel() interface{} {
 
 // NewStore returns a store implementation for the given collection based on defaultStoreType.
 func NewStore(name string) Store {
-	model := models[name]
+	key := strings.ToLower(strings.TrimSpace(name))
+	model := models[key]
 	if model == nil {
+		log.Printf("❌ Model NOT found in registry: %s (original: %s)", key, name)
+		for k := range models {
+			log.Printf("   Available model: %s", k)
+		}
 		return nil
 	}
+	log.Printf("✅ Model found in registry: %s", key)
 	switch defaultStoreType {
 	case "mongo":
 		return &MongoStore{name: name, model: model}
@@ -379,6 +387,7 @@ func NewStore(name string) Store {
 // C (Unified Create Handler)
 func C(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		name = strings.ToLower(strings.TrimSpace(name))
 		s := NewStore(name)
 		if s == nil {
 			respond(w, 500, false, "model not registered", nil)
@@ -400,6 +409,7 @@ func C(name string) http.HandlerFunc {
 // R (Unified Read All Handler)
 func R(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		name = strings.ToLower(strings.TrimSpace(name))
 		s := NewStore(name)
 		if s == nil {
 			respond(w, 500, false, "model not registered", nil)
@@ -421,6 +431,7 @@ func R(name string) http.HandlerFunc {
 // GetByID (Unified Read by ID Handler)
 func GetByID(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		name = strings.ToLower(strings.TrimSpace(name))
 		s := NewStore(name)
 		if s == nil {
 			respond(w, 500, false, "model not registered", nil)
@@ -456,6 +467,7 @@ func GetByID(name string) http.HandlerFunc {
 // U (Unified Update Handler)
 func U(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		name = strings.ToLower(strings.TrimSpace(name))
 		s := NewStore(name)
 		if s == nil {
 			respond(w, 500, false, "model not registered", nil)
@@ -486,6 +498,7 @@ func U(name string) http.HandlerFunc {
 // D (Unified Delete Handler)
 func D(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		name = strings.ToLower(strings.TrimSpace(name))
 		s := NewStore(name)
 		if s == nil {
 			respond(w, 500, false, "model not registered", nil)
