@@ -106,6 +106,20 @@ var AICrud = AICrudHandler
 // External AI (Cloud LLMs)
 var AI_OpenAI = PromptOpenAI
 var AI_Gemini = PromptGemini
+// SetAIProvider is exported from llm.go
+
+// ========================
+// Blockchain (Web3)
+// ========================
+
+// EthConnect initializes the connection to an Ethereum node.
+var EthConnect = ConnectEthereum
+
+// EthBalance returns the balance of an address.
+var EthBalance = GetEthBalance
+
+// EthTransact sends a transaction to a smart contract.
+var EthTransact = TransactContract
 
 // Health is a ready-to-use health check handler.
 //
@@ -116,3 +130,9 @@ var Health = HealthHandler
 
 // Render is a handler that serves a local file (e.g. index.html).
 var Render = RenderHandler
+
+// ========================
+// External APIs
+// ========================
+
+// CallAPI and GetWeather are exported from api_client.go

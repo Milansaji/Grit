@@ -58,7 +58,11 @@ func (r *Router) Start(port string) error {
 	log.Printf("%s🚀 Server http://localhost:%s%s", Green, port, Reset)
 	log.Printf("%s📘 Docs http://localhost:%s/docs%s", Blue, port, Reset)
 
-	return http.ListenAndServe(":"+port, h)
+	err := http.ListenAndServe(":"+port, h)
+	if err != nil {
+		log.Printf("%s❌ Server error: %v%s", Red, err, Reset)
+	}
+	return err
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

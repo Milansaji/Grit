@@ -35,13 +35,20 @@ type OllamaResponse struct {
 	Done      bool   `json:"done"`
 }
 
-// LLMConfig holds the configuration for the local LLM.
+// LLMConfig holds the configuration for the LLM.
 type LLMConfig struct {
-	BaseURL string
+	BaseURL  string
+	Provider string // "ollama", "openai", "gemini"
 }
 
 var defaultConfig = LLMConfig{
-	BaseURL: "http://localhost:11434/api/generate",
+	BaseURL:  "http://localhost:11434",
+	Provider: "ollama",
+}
+
+// SetAIProvider sets the LLM provider to use ("ollama", "openai", "gemini").
+func SetAIProvider(provider string) {
+	defaultConfig.Provider = provider
 }
 
 // SetLLMBaseURL allows overriding the default Ollama URL.
@@ -49,43 +56,56 @@ func SetLLMBaseURL(url string) {
 	defaultConfig.BaseURL = url
 }
 
-// Prompt sends a prompt to the local Ollama instance and returns the response.
-// It uses the default model and URL unless overridden.
-// If the environment variable OLLAMA_HOST is set, it will be used as the base URL.
+// Prompt sends a prompt to the configured LLM provider and returns the response.
 func Prompt(model string, prompt string) (string, error) {
-	url := defaultConfig.BaseURL
-	if envHost := os.Getenv("OLLAMA_HOST"); envHost != "" {
-		url = fmt.Sprintf("%s/api/generate", envHost)
-	}
+	switch defaultConfig.Provider {
+	case "openai":
+		if model == "" {
+			model = "gpt-3.5-turbo"
+		}
+		return PromptOpenAI(model, prompt)
+	case "gemini":
+		if model == "" {
+			model = "gemini-1.5-flash"
+		}
+		return PromptGemini(model, prompt)
+	case "ollama":
+		fallthrough
+	default:
+		url := fmt.Sprintf("%s/api/generate", defaultConfig.BaseURL)
+		if envHost := os.Getenv("OLLAMA_HOST"); envHost != "" {
+			url = fmt.Sprintf("%s/api/generate", envHost)
+		}
 
-	reqBody := OllamaRequest{
-		Model:  model,
-		Prompt: prompt,
-		Stream: false,
-	}
+		reqBody := OllamaRequest{
+			Model:  model,
+			Prompt: prompt,
+			Stream: false,
+		}
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %v", err)
-	}
+		jsonData, err := json.Marshal(reqBody)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal request: %v", err)
+		}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to Ollama: %v (is it running?)", err)
-	}
-	defer resp.Body.Close()
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			return "", fmt.Errorf("failed to connect to Ollama: %v (is it running?)", err)
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama returned error: %s (status: %d)", string(body), resp.StatusCode)
-	}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return "", fmt.Errorf("ollama returned error: %s (status: %d)", string(body), resp.StatusCode)
+		}
 
-	var ollamaResp OllamaResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
-		return "", fmt.Errorf("failed to decode response: %v", err)
-	}
+		var ollamaResp OllamaResponse
+		if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+			return "", fmt.Errorf("failed to decode response: %v", err)
+		}
 
-	return ollamaResp.Response, nil
+		return ollamaResp.Response, nil
+	}
 }
 
 // Embed generates an embedding for a given prompt using the local Ollama instance.

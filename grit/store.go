@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -554,10 +555,13 @@ func U(name string) http.HandlerFunc {
 		}
 		id, ok := payload["id"]
 		if !ok {
+			log.Printf("%s❌ Update failed: ID missing in payload%s", Red, Reset)
 			respond(w, 400, false, "id required", nil)
 			return
 		}
+		log.Printf("%s🔄 Updating %s ID: %v%s", Purple, name, id, Reset)
 		if err := s.Update(id, payload); err != nil {
+			log.Printf("%s❌ Store update error: %v%s", Red, err, Reset)
 			respond(w, 500, false, err.Error(), nil)
 			return
 		}

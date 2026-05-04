@@ -3,6 +3,7 @@ package grit
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"cloud.google.com/go/firestore"
@@ -315,12 +316,14 @@ func FirestoreU(name string) http.HandlerFunc {
 		}
 
 		// MergeAll — only provided fields are updated
+		log.Printf("%s🔥 Firestore Doc(%s).Set(MergeAll) with payload: %v %s", Purple, id, payload, Reset)
 		_, err := firestoreClient.Collection(name).Doc(id).Set(
 			context.Background(),
 			payload,
 			firestore.MergeAll,
 		)
 		if err != nil {
+			log.Printf("%s❌ Firestore error: %v%s", Red, err, Reset)
 			respond(w, 500, false, "Firestore error: "+err.Error(), nil)
 			return
 		}
